@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="소스 파일">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="헤더 파일">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="리소스 파일">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="소스 파일\MTG">
+      <UniqueIdentifier>{43d1ea87-0f5c-4c77-b565-467029ca887b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\Utility">
+      <UniqueIdentifier>{2f3b969a-711a-4f2c-aa73-4a9ac872520d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\MTG\Parse">
+      <UniqueIdentifier>{24fcbbf9-6c48-4e07-bde4-917f55de730e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\MTG\Parse\Tags">
+      <UniqueIdentifier>{58a8bc9d-b2fa-49c6-897e-2c861ce67008}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\MTG\Parse\Collapse">
+      <UniqueIdentifier>{03b49c41-e56b-49bb-87b8-c9d4ebc51115}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="소스 파일\MTG\Parse\Sentence">
+      <UniqueIdentifier>{2d0dc75c-1307-4e37-b190-9b5989a1ffc8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="Keyword.cpp">
+      <Filter>소스 파일\MTG</Filter>
+    </ClCompile>
+    <ClCompile Include="Card.cpp">
+      <Filter>소스 파일\MTG</Filter>
+    </ClCompile>
+    <ClCompile Include="WordTag.cpp">
+      <Filter>소스 파일\MTG\Parse\Tags</Filter>
+    </ClCompile>
+    <ClCompile Include="ChoiceTag.cpp">
+      <Filter>소스 파일\MTG\Parse\Tags</Filter>
+    </ClCompile>
+    <ClCompile Include="ObjectTag.cpp">
+      <Filter>소스 파일\MTG\Parse\Tags</Filter>
+    </ClCompile>
+    <ClCompile Include="ConjunctedTag.cpp">
+      <Filter>소스 파일\MTG\Parse\Tags</Filter>
+    </ClCompile>
+    <ClCompile Include="StringUtility.cpp">
+      <Filter>소스 파일\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="Sentence.cpp">
+      <Filter>소스 파일\MTG\Parse\Sentence</Filter>
+    </ClCompile>
+    <ClCompile Include="SentenceParser.cpp">
+      <Filter>소스 파일\MTG\Parse\Sentence</Filter>
+    </ClCompile>
+    <ClCompile Include="SentenceCollapse.cpp">
+      <Filter>소스 파일\MTG\Parse\Collapse</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Literal.h">
+      <Filter>소스 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="Keyword.h">
+      <Filter>소스 파일\MTG</Filter>
+    </ClInclude>
+    <ClInclude Include="Card.h">
+      <Filter>소스 파일\MTG</Filter>
+    </ClInclude>
+    <ClInclude Include="ObjectTag.h">
+      <Filter>소스 파일\MTG\Parse\Tags</Filter>
+    </ClInclude>
+    <ClInclude Include="StringUtility.h">
+      <Filter>소스 파일\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="PointerT.h">
+      <Filter>소스 파일\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Sentence.h">
+      <Filter>소스 파일\MTG\Parse\Sentence</Filter>
+    </ClInclude>
+    <ClInclude Include="SentenceParser.h">
+      <Filter>소스 파일\MTG\Parse\Sentence</Filter>
+    </ClInclude>
+    <ClInclude Include="SentenceCollapse.h">
+      <Filter>소스 파일\MTG\Parse\Collapse</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

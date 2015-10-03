@@ -6,6 +6,9 @@
 *.user
 *.userosscache
 *.sln.docstates
+~$*.xlsx
+/ParseMtgJson/debug.txt
+/ParseMtgJson/mtg.csv
 
 # Build results
 [Dd]ebug/
