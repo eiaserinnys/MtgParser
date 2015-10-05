@@ -1,0 +1,492 @@
+//////////////////////////////////////////////////////////////////////////////////
+//                                                      Mint Virtual Machine Win32
+//                                                               mint::CScriptElex
+//
+//                                       eias erinys fecit, begins at 2001. 06. 04
+//                                          eias@nexon.co.kr, sheplany@nownuri.net
+//////////////////////////////////////////////////////////////// component of Mint
+
+//////////////////////////////////////////////////////////////////////////////////
+// global definition
+global
+{
+	precompiled_header	= "pch.h";
+	filename			= "ReactorExpressionParser";
+	
+	include
+	{*
+		#include "ReactorExpressionTree.h"
+		#include "ReactorExpressionBinary.h"
+	*};
+	
+	define
+	{*
+		//------------------------------------------------------------------------------
+		static float ExtractFloat(void* ptrValue)
+		// : 포인터 값을 그대로 캐스팅해서 부동소수점 값으로 변환한다
+		{
+			UInt32	asUInt32	= reinterpret_cast<UInt32>(ptrValue);
+			float	value		= *reinterpret_cast<float*>(&asUInt32);
+			return value;
+		}
+
+		//------------------------------------------------------------------------------
+		static ReactorExprList*
+			ExtractArgumentList(
+				void* value, 
+				void* next_)
+		// : 리스트를 파싱한 결과를 뒤집어서 링크해준다
+		{
+			ReactorExprList* next = reinterpret_cast<ReactorExprList*>(next_);
+		
+			return new ReactorExprList(
+				reinterpret_cast<IReactorExprNode*>(value),
+				next,
+				next != NULL ? next->GetCount() + 1 : 1);
+		}
+
+		//////////////////////////////////////////////////////////////////////////////////
+		template <class BinaryExpr>
+		static BinaryExpr* ExtractBinary(
+			void* left_, 
+			void* opPtr_, 
+			void* right_)
+		// : extract
+		{
+			IReactorExprNode* left = reinterpret_cast<IReactorExprNode*>(left_);
+			IReactorExprNode* right = reinterpret_cast<IReactorExprNode*>(right_);
+		
+			if (left != NULL && right != NULL)
+			{
+				BinaryExpr* currentExpr = NULL;
+				
+				if (dynamic_cast<BinaryExpr*>(right) != NULL)
+				{
+					currentExpr = dynamic_cast<BinaryExpr*>(right);
+					
+					while (
+						dynamic_cast<BinaryExpr*>(
+							currentExpr->GetLeftExpression()) != NULL)
+					{
+						currentExpr = dynamic_cast<BinaryExpr*>(
+							currentExpr->GetLeftExpression());
+					}
+
+					BinaryExpr* newExpr = new BinaryExpr(
+						left,
+						currentExpr->GetLeftExpression(),
+						static_cast<ReactorExprOP::Type>((int) opPtr_));
+
+					currentExpr->SetLeftExpression(newExpr);
+
+					return dynamic_cast<BinaryExpr*>(right);
+				}
+				else
+				{
+					return new BinaryExpr(
+						left, 
+						right, 
+						static_cast<ReactorExprOP::Type>((int) opPtr_));
+				}
+			}
+			else
+			{
+				if (left != NULL) {	delete left; }
+				if (right != NULL) { delete right; }
+				return NULL;
+			}
+		}
+	*};
+};
+
+//////////////////////////////////////////////////////////////////////////////////
+// lexer items
+lexer 
+{
+	classname		= "ReactorExpressionLexer";
+	prefix			= "TOKEN_";
+	
+	state default
+	{
+		//////////////////////////////////////////////////////////////////////////
+		// ignores
+		WHITESPACE			{:	[" "\t]+	:}
+		{
+			ignore;
+			modify
+			{*				
+				size_t	length = TOKEN_TEXT().size();
+				unsigned	col, tab;
+				wchar_t		space;
+				
+				col = TOKEN_COL();
+				
+				for (size_t i = 0; i < length; i++)
+				{
+					space = TOKEN_TEXT()[i];	
+				
+					if (space == L' ')
+					{
+						++col;
+					}
+					else
+					{
+						tab = 3 - (col % 4);
+						++col;
+						for (size_t j = 0; j < tab; j++)
+						{
+							NEXTCOL();
+							++col;
+						}
+					}
+				}			
+			*};
+		};
+		
+		// carrage return
+		NEWLINE				{:	(\n?\r) | (\r?\n)	:}
+		{
+			ignore;	
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+
+		// line remark
+		// ;또는 // 로 시작
+		REMARKLINE			{:	; ([\n\r]~* ((\n?\r)|(\r?\n)))	:}
+		{
+			ignore;
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+		
+		//////////////////////////////////////////////////////////////////////////
+		// symbols and operators
+		LBRACK				{:#[:};
+		RBRACK				{:#]:};
+		LBRACE				{:#{:};
+		RBRACE				{:#}:};
+		LPAREN				{:#(:};
+		RPAREN			    {:#):};
+
+		COMMA				{:,:};
+
+		NOT					{:{#!}:};
+		OR					{:{#|#|}:}
+		{
+			value
+			{*
+				RETURN(ReactorExprOP::Or);
+			*};
+		};
+		
+		AND					{:{#&&}:}
+		{
+			value
+			{*
+				RETURN(ReactorExprOP::And);
+			*};
+		};
+
+		MUL					{:#*|#/|#%:}
+		{
+			value
+			{*
+				ReactorExprOP::Type opType;
+
+				switch (TOKEN_TEXT().at(0)) {
+				case _T('*'):	opType = ReactorExprOP::Multiply;	break;
+				case _T('/'):	opType = ReactorExprOP::Divide;		break;
+				case _T('%'):	opType = ReactorExprOP::Modulo;		break;
+				default:					
+					CORE_WARNING(
+						_T("eias@nexon.co.kr"),
+						_T("8563B3C5-FB89-4BF9-901A-AA4AFFDC36EB"),
+						_T("알 수 없는 곱셈 연산자가 주어졌습니다."));						
+
+					opType = ReactorExprOP::Invalid;	
+					break;
+				};
+
+				RETURN(opType);
+			*};
+		};
+
+		ADD					{:#+|#-:}
+		{
+			value
+			{*
+				ReactorExprOP::Type opType;
+
+				switch (TOKEN_TEXT().at(0)) {
+				case _T('+'):	opType = ReactorExprOP::Add;		break;
+				case _T('-'):	opType = ReactorExprOP::Subtract;	break;
+				default:
+					CORE_WARNING(
+						_T("eias@nexon.co.kr"),
+						_T("E01B1F74-0E93-4DA7-98CB-4C6962C417AE"),
+						_T("알 수 없는 덧셈 연산자가 주어졌습니다."));
+					opType = ReactorExprOP::Invalid;
+					break;
+				};
+
+				RETURN(opType);
+			*};
+		}
+
+		ART					{:(>=)|>|(<=)|<|(==)|(!=)|(#~=):}
+		{
+			value
+			{*
+				ReactorExprOP::Type opType;
+
+				switch (TOKEN_TEXT().at(0)) {
+				case _T('<'):	
+					opType = TOKEN_TEXT().at(1) == _T('=') ? 
+						ReactorExprOP::LessEqual :
+						ReactorExprOP::Less;
+					break;
+
+				case _T('>'):	
+					opType = TOKEN_TEXT().at(1) == _T('=') ?
+						ReactorExprOP::GreaterEqual :
+						ReactorExprOP::Greater;
+					break;
+
+				case _T('='):	opType = ReactorExprOP::Equal;		break;
+				case _T('!'):	opType = ReactorExprOP::NotEqual;	break;
+				
+				default:
+					CORE_WARNING(
+						_T("eias@nexon.co.kr"),
+						_T("BFF58EDE-C986-42AA-BA4A-677630449AD0"),
+						_T("알 수 없는 산술 비교 연산자가 주어졌습니다."));
+					opType = ReactorExprOP::Invalid;
+					break;
+				};
+
+				RETURN(opType);
+			*};
+		}
+
+		INTEGER				{:(0-9+):}
+		{
+			value
+			{*
+				RETURN(_ttoi(TOKEN_TEXT().c_str()));
+			*};
+		};
+
+		FLOAT				{:0-9+.0-9+:}
+		{
+			value
+			{*
+				float value = static_cast<float>(_tstof(TOKEN_TEXT().c_str()));
+				RETURN(*reinterpret_cast<UInt32*>(&value));			
+			*};
+		};
+
+		//////////////////////////////////////////////////////////////////////////
+		// id
+		ID					{:[#_#$a-zA-Z0-9][#_#$a-zA-Z0-9]*:}
+		{
+			value
+			{*
+				RETURN(TOKEN_TEXT().c_str());
+			*};
+		};
+	};
+};
+
+//////////////////////////////////////////////////////////////////////////////////
+// parser rules
+parser
+{
+	classname	= "ReactorExpressionParser";
+	prefix		= "";
+
+	error
+	{*
+		CORE_WARNING(
+			_T("eias@nexon.co.kr"),
+			_T("D3612EA6-AE77-403D-B7FA-1480C1BF26D8"),
+			StringBuilder::Format( 
+				_T("수식 컨트롤러의 수식 파싱에 실패했습니다")));
+	*};
+	
+	//////////////////////////////////////////////////////////////////////////////
+	// begining non-terminal
+	begin		= <SCRIPT>;
+
+	//////////////////////////////////////////////////////////////////////////////
+	// 액션 스크립트
+	<SCRIPT>
+	{
+	    -> <EXPR>
+	    {*
+			RETURN(VAL(0));
+	    *};
+
+	    ->;
+	};
+
+	<EXPR_ID>
+	{
+		-> ID
+		{*
+			RETURN(new ReactorExprID(SYM(0)));
+		*};
+	};
+	
+	<EXPR_PRIME>
+	{
+		-> <EXPR_ID>
+		{*
+			RETURN (VAL(0));
+		*};
+		-> INTEGER
+		{*
+			RETURN(new ReactorExprConstant(reinterpret_cast<int>(VAL(0))));
+		*};
+		-> FLOAT
+		{*
+			RETURN(new ReactorExprConstant(ExtractFloat(VAL(0))));
+		*};
+		-> LPAREN <EXPR> RPAREN
+		{*
+			RETURN(VAL(1));
+		*};
+		-> LBRACK <EXPR> COMMA <EXPR> COMMA <EXPR> RBRACK
+		{*
+			RETURN(new ReactorExprVector(
+				reinterpret_cast<IReactorExprNode*>(VAL(1)), 
+				reinterpret_cast<IReactorExprNode*>(VAL(3)), 
+				reinterpret_cast<IReactorExprNode*>(VAL(5))));
+		*};
+	};
+
+	//----------------------------------------------------------------------------
+	// function call
+	<FUNCTION_CALL>	
+	{
+		-> <EXPR_PRIME>				{* RETURN(VAL(0)); *};
+		-> <EXPR_PRIME>				// VAL(0)
+			LPAREN
+				<ARG_LIST>			// VAL(2)
+			RPAREN
+		{*
+			IReactorExprNode* id = reinterpret_cast<IReactorExprNode*>(VAL(0));
+			ReactorExprList* list = reinterpret_cast<ReactorExprList*>(VAL(2));
+			RETURN(new ReactorExprFunction(id, list));
+		*};
+	};
+	
+	// function call argument
+	<ARG_LIST>
+	{
+		-> <EXPR>
+		{*
+			RETURN(ExtractArgumentList(VAL(0), NULL));
+		*};
+		-> <EXPR> COMMA <ARG_LIST>
+		{*
+			RETURN(ExtractArgumentList(VAL(0), VAL(2)));
+		*};
+		->;
+	};
+
+	//----------------------------------------------------------------------------
+	// 일반 수식
+	<EXPR_CALL>
+	{
+		-> <FUNCTION_CALL>		{* RETURN(VAL(0)); *};
+	};
+	
+	<EXPR_UNARY_PREFIX>
+	{
+		-> <EXPR_CALL>			{* RETURN(VAL(0)); *};
+		-> ADD <EXPR_CALL>
+		{*
+			RETURN(new ReactorExprUnary(
+				reinterpret_cast<IReactorExprNode*>(VAL(1)), 
+				static_cast<ReactorExprOP::Type>((int) VAL(0)) == ReactorExprOP::Add ? 
+					ReactorExprOP::UnaryPlus : 
+					ReactorExprOP::UnaryMinus));
+		*};
+	};
+
+	<EXPR_MULTIPLICATIVE>
+	{
+		-> <EXPR_UNARY_PREFIX>	{* RETURN (VAL(0)); *};
+		-> <EXPR_UNARY_PREFIX> MUL <EXPR_MULTIPLICATIVE>
+		{*
+			RETURN(ExtractBinary<ReactorExprMultiplicative>(
+				VAL(0), VAL(1), VAL(2)));
+		*};
+	};
+
+	<EXPR_ADDITIVE>
+	{
+		-> <EXPR_MULTIPLICATIVE>	{* RETURN (VAL(0)); *};
+		-> <EXPR_MULTIPLICATIVE> ADD <EXPR_ADDITIVE>
+		{*
+			RETURN(ExtractBinary<ReactorExprAdditive>(
+				VAL(0), VAL(1), VAL(2)));
+		*};
+	};
+
+	<EXPR_ARITHMETIC>
+	{
+		-> <EXPR_ADDITIVE> 		{* RETURN (VAL(0)); *};
+		-> <EXPR_ADDITIVE> ART <EXPR_ARITHMETIC>
+		{*
+			RETURN(ExtractBinary<ReactorExprArithmetic>(
+				VAL(0), VAL(1), VAL(2)));
+		*};
+	};
+
+//--------------------------------------------------------------------------------
+// logical
+	<EXPR_LOGICAL_NOT>
+	{
+		-> <EXPR_ARITHMETIC>		{* RETURN(VAL(0)); *};
+		-> NOT <EXPR_LOGICAL_NOT>
+		{*
+			RETURN(new ReactorExprUnary(
+				reinterpret_cast<IReactorExprNode*>(VAL(1)),
+				ReactorExprOP::Not));
+		*};
+	};
+
+	<EXPR_LOGICAL_AND>
+	{
+		-> <EXPR_LOGICAL_NOT>	{* RETURN(VAL(0)); *};
+		-> <EXPR_LOGICAL_NOT> AND <EXPR_LOGICAL_AND>
+		{*
+			RETURN(ExtractBinary<ReactorExprLogicalAnd>(
+				VAL(0), VAL(1), VAL(2)));
+		*};
+	};
+
+	<EXPR_LOGICAL_OR>
+	{
+		-> <EXPR_LOGICAL_AND>	{* RETURN(VAL(0)); *};
+		-> <EXPR_LOGICAL_AND> OR <EXPR_LOGICAL_OR>
+		{*
+			RETURN(ExtractBinary<ReactorExprLogicalOr>(
+				VAL(0), VAL(1), VAL(2)));
+		*};
+	};
+	
+	<EXPR>
+	{
+		-> <EXPR_LOGICAL_OR>
+		{*
+			RETURN(VAL(0));
+		*};
+	};
+};	

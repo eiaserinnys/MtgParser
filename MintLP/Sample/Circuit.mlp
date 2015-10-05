@@ -1,0 +1,313 @@
+//////////////////////////////////////////////////////////////////////////////////
+// global definition
+global
+{
+	precompiled_header	= "pch.h";
+	filename			= "CircuitScript";
+
+	include
+	{*
+		#include <Text/StlStringHelper.h>
+		#include "CircuitBase.h"
+		#include "CircuitBaseAst.h"
+	*};
+
+	define
+	{*
+		using namespace Framework;
+		using namespace CircuitBaseAst;
+	*};
+};
+
+//////////////////////////////////////////////////////////////////////////////////
+// lexer items
+lexer
+{
+	classname		= "SwitchCircuitLexer";
+	prefix			= "TOKEN_";
+
+	state default
+	{
+		//////////////////////////////////////////////////////////////////////////
+		// ignores
+		WHITESPACE			{:	[" "\t]+	:}
+		{
+			ignore;
+			modify
+			{*
+				size_t	length = TOKEN_TEXT().size();
+				unsigned	col, tab;
+				wchar_t		space;
+
+				col = TOKEN_COL();
+
+				for (size_t i = 0; i < length; i++)
+				{
+					space = TOKEN_TEXT()[i];
+
+					if (space == _T(' '))
+					{
+						++col;
+					}
+					else
+					{
+						tab = 3 - (col % 4);
+						++col;
+						for (unsigned j = 0; j < tab; j++)
+						{
+							NEXTCOL();
+							++col;
+						}
+					}
+				}
+			*};
+		};
+
+		// carrage return
+		NEWLINE				{:	(\n?\r) | (\r?\n)	:}
+		{
+			ignore;
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+
+		// XML
+		// <로 시작
+		REMARKLINE			{:	\<([\n\r]~*)\>	:}
+		{
+			ignore;
+			modify
+			{*
+			*};
+		};
+
+
+		//////////////////////////////////////////////////////////////////////////
+		// symbols and operators
+		LBRACK				{:#[:};
+		RBRACK				{:#]:};
+		LBRACE				{:#{:};
+		RBRACE				{:#}:};
+		LPAREN				{:#(:};
+		RPAREN			    {:#):};
+
+		COMMA				{:,:};
+		PERIOD				{:.:};
+		DCOLON				{:#:#::};
+		COLON				{:#::};
+		SEMICOLON			{:#;:};
+
+		ASSIGN				{:#=:}
+
+		DOLLAR				{:#$:};
+
+		QMARK				{:#?:};
+		STAR				{:#*:};
+
+		LOGIC				{:{LOGIC}:};
+		DATA				{:{DATA}:};
+		ANIM				{:{ANIM}:};
+		PROPERTY			{:{PROPERTY}:};		
+
+		SWITCH				{:{SWITCH}:};
+		CASE				{:{CASE}:};
+		DEFAULT				{:{DEFAULT#:}:};
+
+		NULL				{:{NULL}:};
+
+		//////////////////////////////////////////////////////////////////////////
+		STRING				{:	#"([#"#\]~|(#\#")|(#\#"~))*#"	:}
+		{
+			modify
+			{*
+				size_t length = TOKEN_TEXT().size();
+
+				// process
+				RETURN() = _T("");
+
+				bool	enter = false;
+				wchar_t	getChar;
+
+				for (size_t i = 0; i < length; ++i)
+				{
+					getChar = TOKEN_TEXT()[i];
+
+					switch(getChar)
+					{
+						case _T('"'):
+							enter = !enter;
+							break;
+						case _T('\\'):
+							RETURN() += TOKEN_TEXT().substr(i, 2);
+							++i;
+							break;
+						default:
+							if (enter)
+							{
+								RETURN() += getChar;
+							}
+							break;
+					}
+				}
+
+				// process escape
+			*};
+		}
+
+		//////////////////////////////////////////////////////////////////////////
+		// id
+		ID					{:[#_#$a-zA-Z][#_#$/a-zA-Z0-9]*:}
+		{
+			value
+			{*
+				RETURN(TOKEN_TEXT().c_str());
+			*};
+		};
+
+
+	};
+};
+
+//////////////////////////////////////////////////////////////////////////////////
+// parser rules
+parser
+{
+	classname	= "SwitchCircuitParser";
+	prefix		= "";
+
+	error
+	{*
+	*};
+
+	//////////////////////////////////////////////////////////////////////////////
+	// begining non-terminal
+	begin		= <CIRCUIT>;
+
+	//////////////////////////////////////////////////////////////////////////////
+	<CIRCUIT>
+	{
+		// 일반적인 문법은 아닌데 급한대로 이렇게 하자
+		-> LOGIC LBRACE <ALIASES> RBRACE DATA LBRACE <ALIASES> RBRACE ANIM LBRACE <ALIASES> RBRACE PROPERTY LBRACE <ALIASES> RBRACE <VALUES>
+	    {*
+			CircuitBase* circuit = new CircuitBase;
+			circuit->AddAlias(0, VAL(2));
+			circuit->AddAlias(1, VAL(6));
+			circuit->AddAlias(2, VAL(10));
+			circuit->AddAlias(3, VAL(14));
+			circuit->SetValues(VAL(16));
+			RETURN(circuit);
+	    *};
+
+	    -> <VALUES>
+	    {*
+			CircuitBase* circuit = new CircuitBase;
+			circuit->SetValues(VAL(0));
+			RETURN(circuit);
+	    *};
+	};
+
+	//////////////////////////////////////////////////////////////////////////////
+	<ALIASES>
+	{
+		-> STRING ASSIGN STRING <ALIASES>
+	    {*
+			Alias* alias = new Alias;
+			alias->key = SYM(0);
+			alias->value = SYM(2);
+			alias->next = static_cast<Alias*>(VAL(3));
+			RETURN(alias);
+	    *};
+
+	    ->
+	    {*
+			RETURN(NULL);
+	    *};
+	};
+
+
+	//////////////////////////////////////////////////////////////////////////////
+	<VALUES>
+	{
+		-> <VALUE> <VALUES>
+	    {*
+			RETURN(
+				new Values(
+					static_cast<Value*>(VAL(0)),
+					static_cast<Values*>(VAL(1))));
+	    *};
+
+	    ->
+	};
+
+	//////////////////////////////////////////////////////////////////////////////
+	<VALUE>
+	{
+		-> <RESULT>
+	    {*
+			RETURN(new Value(static_cast<Result*>(VAL(0))));
+	    *};
+
+		-> <SWITCH>
+		{*
+			RETURN(new Value(static_cast<Switch*>(VAL(0))));
+	    *};
+	};
+
+	//////////////////////////////////////////////////////////////////////////////
+	<RESULT>
+	{
+		-> STRING
+	    {*
+			RETURN(new Result(SYM(0)));
+	    *};
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	<SWITCH>
+	{
+		-> SWITCH STRING LBRACE <CASES> <DEFAULT> RBRACE
+	    {*
+			RETURN(
+				new Switch(
+					SYM(1),
+					static_cast<Cases*>(VAL(3)),
+					static_cast<Default*>(VAL(4))));
+	    *};
+	};
+
+	//////////////////////////////////////////////////////////////////////////////
+	<CASES>
+	{
+		-> <CASE> <CASES>
+	    {*
+			RETURN(
+				new Cases(
+				static_cast<Case*>(VAL(0)),
+				static_cast<Cases*>(VAL(1))));
+	    *};
+
+	    ->
+	};
+
+	//////////////////////////////////////////////////////////////////////////////
+	<CASE>
+	{
+		-> CASE STRING COLON <VALUES>
+	    {*
+			RETURN(new Case(SYM(1), static_cast<Values*>(VAL(3))));
+	    *};
+	};
+
+	//////////////////////////////////////////////////////////////////////////////
+	<DEFAULT>
+	{
+		-> DEFAULT <VALUES>
+	    {*
+			RETURN(new Default(static_cast<Values*>(VAL(1))));
+	    *};
+
+	    ->
+	}
+};	

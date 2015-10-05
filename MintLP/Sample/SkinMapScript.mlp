@@ -1,0 +1,249 @@
+//////////////////////////////////////////////////////////////////////////////////
+//                                                      Mint Virtual Machine Win32
+//                                                               mint::CScriptElex
+//
+//                                       eias erinys fecit, begins at 2001. 06. 04
+//                                          eias@nexon.co.kr, sheplany@nownuri.net
+//////////////////////////////////////////////////////////////// component of Mint
+
+//////////////////////////////////////////////////////////////////////////////////
+// global definition
+global
+{
+	precompiled_header	= "pch.h";
+	filename			= "SkinMapScript";
+	
+	include
+	{*		
+		#include "SkinMapAST.h"
+	*};
+	
+	define
+	{*
+	*};
+};
+
+//////////////////////////////////////////////////////////////////////////////////
+// lexer items
+lexer 
+{
+	classname		= "SkinMapLexer";
+	prefix			= "SKINMAP_";
+	
+	state default
+	{
+		//////////////////////////////////////////////////////////////////////////
+		// ignores
+		WHITESPACE			{:	[" "\t]+	:}
+		{
+			ignore;
+			modify
+			{*				
+				size_t	length = TOKEN_TEXT().size();
+				unsigned	col, tab;
+				wchar_t		space;
+				
+				col = TOKEN_COL();
+				
+				for (size_t i = 0; i < length; i++)
+				{
+					space = TOKEN_TEXT()[i];	
+				
+					if (space == L' ')
+					{
+						++col;
+					}
+					else
+					{
+						tab = 3 - (col % 4);
+						++col;
+						for (size_t j = 0; j < tab; j++)
+						{
+							NEXTCOL();
+							++col;
+						}
+					}
+				}			
+			*};
+		};
+		
+		// carrage return
+		NEWLINE				{:	(\n?\r) | (\r?\n)	:}
+		{
+			ignore;	
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+
+		// line remark
+		// ;또는 // 로 시작
+		REMARKLINE			{:	; ([\n\r]~* ((\n?\r)|(\r?\n)))	:}
+		{
+			ignore;
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+		
+		//////////////////////////////////////////////////////////////////////////
+		// symbols and operators
+		LBRACK				{:#[:};
+		RBRACK				{:#]:};
+		LBRACE				{:#{:};
+		RBRACE				{:#}:};
+		LPAREN				{:#(:};
+		RPAREN			    {:#):};
+
+		COMMA				{:,:};
+		PERIOD				{:.:};
+		DCOLON				{:#:#::};
+		COLON				{:#::};
+		SEMICOLON			{:#;:};
+
+		ASSIGN				{:#=:}
+	
+		DOLLAR				{:#$:};
+
+		//////////////////////////////////////////////////////////////////////////
+		// action script language predifines
+		END					{:{END}:};
+		ACTION				{:{ACTION}:};
+		OPTION				{:{OPTION}:};
+		CONDITION			{:{CONDITION}:};
+		TRANSITION			{:{TRANSITION}:};
+		ON					{:{ON}:};
+		READY				{:{READY}:};
+		IN					{:{IN}:};
+		EXEC				{:{EXEC}:};
+		FOREACH				{:{FOREACH}:};
+		NEXT				{:{NEXT}:}
+		DO					{:{DO}:}
+		SET					{:{SET}:}
+
+		//////////////////////////////////////////////////////////////////////////
+		STRING				{:	#"([#"#\]~|(#\#")|(#\#"~))*#"	:}
+		{
+			modify
+			{*
+				size_t length = TOKEN_TEXT().size();
+				
+				// process
+				RETURN() = _T("");
+				
+				bool	enter = false;
+				wchar_t	getChar;
+				
+				for (size_t i = 0; i < length; ++i)
+				{
+					getChar = TOKEN_TEXT()[i];
+				
+					switch(getChar) 
+					{
+						case _T('"'):
+							enter = !enter;
+							break;
+						case _T('\\'):	
+							RETURN() += TOKEN_TEXT().substr(i, 2);	
+							++i;	
+							break;
+						default:
+							if (enter)	
+							{	
+								RETURN() += getChar;	
+							}
+							break;
+					}
+				}
+
+				// process escape
+			*};
+		}
+
+		INTEGER				{:(0-9+)|(0x[0-9a-fA-F]+):}
+		{
+			value
+			{*
+				int* rv = new int;
+
+				// get integer
+				*rv = _ttoi(TOKEN_TEXT().c_str());
+
+				RETURN(rv);			
+			*};
+		};
+
+		FLOAT				{:0-9+.0-9+:}
+		{
+			value
+			{*
+				float* value = new float;
+				*value = static_cast<float>(_tstof(TOKEN_TEXT().c_str()));
+				RETURN(value);			
+			*};
+		};
+		
+		SKIN_THEME			{: (SKIN#_THEME) :}
+
+		//////////////////////////////////////////////////////////////////////////
+		// id
+		ID					{:[#_#$a-zA-Z0-9][#_#$a-zA-Z0-9]*:}
+		{
+			value
+			{*
+				RETURN(TOKEN_TEXT().c_str());
+			*};
+		};
+	};
+};
+
+//////////////////////////////////////////////////////////////////////////////////
+// parser rules
+parser
+{
+	classname	= "SkinMapParser";
+	prefix		= "";
+
+	error
+	{*
+		//CORE_EXCPT("파싱에 실패했습니다");
+	*};
+	
+	//////////////////////////////////////////////////////////////////////////////
+	// begining non-terminal
+	begin		= <START>;
+
+	<START>
+	{
+	    -> <HEADER> <BODIES>
+	    {*
+	    *};
+	};
+	
+	<HEADER>
+	{
+	    -> SKIN_THEME ASSIGN ID
+	    {*
+			SkinMapAST::GetInstance()->AssignSkinTheme(SYM(2));
+	    *};
+	};
+	
+	<BODIES>
+	{
+		-> <BODY> <BODIES>
+		{*
+		*};
+		
+	    ->;		
+	};
+
+	<BODY>	
+	{
+	    -> ID ASSIGN ID LBRACE ID RBRACE LBRACE INTEGER COMMA INTEGER COMMA INTEGER COMMA INTEGER RBRACE 
+	    {*
+			SkinMapAST::GetInstance()->AssignSkinMapData(SYM(0), SYM(2), *((int*)VAL(7)), *((int*)VAL(9)), *((int*)VAL(11)), *((int*)VAL(13)), SYM(4));
+	    *};
+	};
+};	

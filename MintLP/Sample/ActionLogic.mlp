@@ -1,0 +1,593 @@
+//////////////////////////////////////////////////////////////////////////////
+// global definition
+global
+{
+	precompiled_header	= "pch.h";
+	filename			= "ActionLogicScript";
+
+	include
+	{*
+	*};
+
+	define
+	{*
+		// Core
+		#include <Text/StlStringHelper.h>
+
+		// Game.ActionSystem
+		#include "ActionLogic.h"
+		#include "ActionLogicAst.h"
+
+		using namespace std;
+		using namespace Core;
+		using namespace ActionLogicAst;
+	*};
+};
+
+//////////////////////////////////////////////////////////////////////////////
+// lexer items
+lexer
+{
+	classname		= "ActionLogicLexer";
+	prefix			= "TOKEN_";
+
+	state default
+	{
+		//////////////////////////////////////////////////////////////////////////
+		// ignores
+		WHITESPACE			{:	[" "\t]+	:}
+		{
+			ignore;
+			modify
+			{*
+				size_t	length = TOKEN_TEXT().size();
+				unsigned	col, tab;
+				wchar_t		space;
+
+				col = TOKEN_COL();
+
+				for (size_t i = 0; i < length; i++)
+				{
+					space = TOKEN_TEXT()[i];
+
+					if (space == L' ')
+					{
+						++col;
+					}
+					else
+					{
+						tab = 3 - (col % 4);
+						++col;
+						for (size_t j = 0; j < tab; j++)
+						{
+							NEXTCOL();
+							++col;
+						}
+					}
+				}
+			*};
+		};
+
+		// carrage return
+		NEWLINE				{:	(\n?\r) | (\r?\n)	:}
+		{
+			ignore;
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+
+		// line remark
+		// ; 로 시작
+		REMARKLINE			{:	; ([\n\r]~* ((\n?\r)|(\r?\n))?)	:}
+		{
+			ignore;
+			modify
+			{*
+				NEWLINE();
+			*};
+		};
+
+		//////////////////////////////////////////////////////////////////////////
+		// symbols and operators
+		LBRACK				{:#[:};
+		RBRACK				{:#]:};
+		LBRACE				{:#{:};
+		RBRACE				{:#}:};
+		LPAREN				{:#(:};
+		RPAREN			    {:#):};
+
+		COMMA				{:,:};
+		PERIOD				{:.:};
+		DCOLON				{:#:#::};
+		COLON				{:#::};
+		SEMICOLON			{:#;:};
+
+		ASSIGN				{:#=:}
+
+		DOLLAR				{:#$:};
+
+		//////////////////////////////////////////////////////////////////////////
+		// action logic script language predifines
+		TO					{:{TO}:};
+ 		ONENTER				{:{ONENTER}:};
+ 		ON					{:{ON}:};
+ 		WAITING				{:{WAITING}:};
+ 		ONEXIT				{:{ONEXIT}:};
+
+ 		REPEAT				{:{REPEAT}:}
+
+ 		STAMINA				{:{STAMINA}:}
+
+ 		LOCKGROUP			{:{LOCKGROUP}:}
+ 		ACTIONTYPE			{:{ACTIONTYPE}:};
+
+ 		UNSAFEEXEC			{:{(UNSAFEEXEC)|(REWORK1)|(REWORK2)|(REWORK3)|(REWORK4)|(REWORK5)}:};
+ 		PRIV				{:{PRIV}:};
+ 		SEND				{:{SEND}:};
+ 		EXEC				{:{EXEC}:};
+
+ 		ATTACK				{:{ATTACK}:};
+ 		ENDATTACK			{:{ENDATTACK}:};
+		CLEAR				{:{CLEAR}:};
+ 		BY					{:{BY}:};
+
+ 		EXCEPT				{:{EXCEPT}:};
+ 		PLACING				{:{PLACING}:};
+ 		PLACINGTARGET		{:{PLACINGTARGET}:};
+ 		HOMMING				{:{HOMMING}:};
+ 		MULTIHIT			{:{MULTIHIT}:};
+		ORIGIN				{:{ORIGIN}:};
+		IN					{:{IN}:};
+
+		INTEGER				{:(#-)?(0-9+)|(0x[0-9a-fA-F]+):}
+		{
+			value
+			{*
+				RETURN(IExpression::Create(Fixed32(_tstoi(TOKEN_TEXT().c_str()))));
+			*};
+		};
+
+		FLOAT				{:(#-)?0-9+.0-9+:}
+		{
+			value
+			{*
+				RETURN(IExpression::Create(Fixed32(_tstof(TOKEN_TEXT().c_str()))));
+			*};
+		};
+
+ 		BOOL				{:{(TRUE)|(FALSE)}:}
+ 		{
+ 			value
+			{*
+				RETURN(IExpression::Create(TOKEN_TEXT() == _T("TRUE")));
+			*};
+ 		};
+
+		IDENTIFIER			{:[a-zA-Z][#_a-zA-Z0-9]*:}
+		{
+			value
+			{*
+				RETURN(IExpression::Create(TOKEN_TEXT()));
+			*};
+		};
+
+		//////////////////////////////////////////////////////////////////////////
+		STRING				{:	#"([#"#\]~|(#\#")|(#\#"~))*#"	:}
+		{
+			modify
+			{*
+				size_t length = TOKEN_TEXT().size();
+
+				// process
+				RETURN() = _T("");
+
+				bool	enter = false;
+				wchar_t	getChar;
+
+				for (size_t i = 0; i < length; ++i)
+				{
+					getChar = TOKEN_TEXT()[i];
+
+					switch(getChar)
+					{
+						case _T('"'):
+							enter = !enter;
+							break;
+						case _T('\\'):
+							RETURN() += TOKEN_TEXT().substr(i, 2);
+							++i;
+							break;
+						default:
+							if (enter)
+							{
+								RETURN() += getChar;
+							}
+							break;
+					}
+				}
+
+				// process escape
+			*};
+		}
+	};
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// parser rules
+parser
+{
+	classname	= "ActionLogicParser";
+	prefix		= "";
+
+	error
+	{*
+		//CORE_EXCPT("파싱에 실패했습니다");
+	*};
+
+	////////////////////////////////////////////////////////////////////////////
+	// begining non-terminal
+	begin		= <ACTION_LOGIC>;
+
+	////////////////////////////////////////////////////////////////////////////
+	<ACTION_LOGIC>
+	{
+	    ->	<REPEAT_DEF>
+			<ACTIONTYPE_DEF_LIST>
+			<LOCKGROUP_DEF>
+			<USE_DEF>
+			<ONENTER_EVENT>
+			<FRAME_EVENT_LIST>
+			<WAITING_EVENT>
+			<ONEXIT_EVENT>
+	    {*
+			ActionLogic* logic = new ActionLogic;
+			if(logic != NULL)
+			{
+				//--------------------------------------------------------------
+				//
+
+				// 루프
+				logic->SetRepeat(static_cast<IRepeatDefine*>(VAL(0)));
+
+				// 어택타입
+				{
+					const IActionTypeDefine* atd = static_cast<IActionTypeDefine*>(VAL(1));
+					while(atd != NULL)
+					{
+						atd = logic->AddActionType(atd);
+					}
+				}
+
+				// 락그룹
+				logic->SetLockGroup(static_cast<ILockGroupDefine*>(VAL(2)));
+
+				// 스태미너
+				logic->SetStaminaUse(static_cast<IUseStaminaDefine*>(VAL(3)));
+
+				//--------------------------------------------------------------
+				// 시작 이벤트
+				logic->AddFrameEvent(static_cast<IFrameEvent*>(VAL(4)));
+
+				// 실행 이벤트 순차 추가
+				{
+					IFrameEvent* ast = static_cast<IFrameEvent*>(VAL(5));
+					while(ast != NULL)
+					{
+						logic->AddFrameEvent(ast);
+						ast = ast->GetNext();
+						// 삭제는 actionLogic파괴시 같이 한다.
+					}
+				}
+
+				// 대기 설정
+				logic->SetWaiting(static_cast<IWaitingEvent*>(VAL(6)));
+
+				// 종료 이벤트
+				logic->AddFrameEvent(static_cast<IFrameEvent*>(VAL(7)));
+
+			}
+			RETURN(logic);
+	    *};
+
+	    ->;
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<REPEAT_DEF>
+	{
+		-> REPEAT
+ 		{*
+			RETURN(IRepeatDefine::Create());
+ 		*};
+
+		->;
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<LOCKGROUP_DEF>
+	{
+		-> LOCKGROUP IDENTIFIER
+ 		{*
+ 			RETURN(ILockGroupDefine::Create(SYM(1)));
+		*};
+
+		->;
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<USE_DEF>
+	{
+		-> STAMINA IDENTIFIER
+ 		{*
+			RETURN(IUseStaminaDefine::Create(SYM(1)));
+ 		*};
+
+		->;
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ONENTER_EVENT>
+	{
+		-> ONENTER <STATEMENT_LIST>
+		{*
+			RETURN(IFrameEvent::Create(_T("ONENTER"), static_cast<IStatement*>(VAL(1))));
+		*};
+
+		->;
+	};
+
+
+	////////////////////////////////////////////////////////////////////////////
+	<ACTIONTYPE_DEF_LIST>
+	{
+		-> <ACTIONTYPE_DEF> <ACTIONTYPE_DEF_LIST>
+		{*
+			IActionTypeDefine* ast = static_cast<IActionTypeDefine*>(VAL(0));
+			if(ast != NULL) { ast->SetNext(static_cast<IActionTypeDefine*>(VAL(1))); }
+			RETURN(ast);
+		*};
+
+		->;
+	};
+
+	<ACTIONTYPE_DEF>
+	{
+		->ACTIONTYPE IDENTIFIER
+ 		{*
+ 			RETURN(IActionTypeDefine::Create(SYM(1)));
+		*};
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<FRAME_EVENT_LIST>
+	{
+		-> <FRAME_EVENT> <FRAME_EVENT_LIST>
+		{*
+			IFrameEvent* ast = static_cast<IFrameEvent*>(VAL(0));
+			if(ast != NULL) { ast->SetNext(static_cast<IFrameEvent*>(VAL(1))); }
+			RETURN(ast);
+		*};
+
+		-> <FRAME_EVENT>
+		{*
+			RETURN(VAL(0));
+		*};
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<FRAME_EVENT>
+	{
+		->ON IDENTIFIER <STATEMENT_LIST>
+		{*
+			RETURN(IFrameEvent::Create(SYM(1), static_cast<IStatement*>(VAL(2))));
+		*};
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<WAITING_EVENT>
+	{
+		-> WAITING
+ 		{*
+			RETURN(IWaitingEvent::Create());
+ 		*};
+
+		->;
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ONEXIT_EVENT>
+	{
+		-> ONEXIT <STATEMENT_LIST>
+		{*
+			RETURN(IFrameEvent::Create(_T("ONEXIT"), static_cast<IStatement*>(VAL(1))));
+		*};
+
+		->;
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<STATEMENT_LIST>
+	{
+		-> <STATEMENT> <STATEMENT_LIST>
+		{*
+			IStatement* ast = static_cast<IStatement*>(VAL(0));
+			if(ast != NULL) { ast->SetNext(static_cast<IStatement*>(VAL(1))); }
+			RETURN(ast);
+		*};
+
+		->;
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<STATEMENT>
+	{
+		-> <FUNCTION_STATEMENT>
+		{*
+			RETURN(VAL(0));
+		*};
+
+		-> <ATTACK_STATEMENT>
+		{*
+			RETURN(VAL(0));
+		*};
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<FUNCTION_STATEMENT>
+	{
+		-> UNSAFEEXEC IDENTIFIER LPAREN <EXPRESSION_LIST> RPAREN
+		{*
+			RETURN(IStatement::CreateFunction(ExecutionSemantic::Unknown, SYM(1), static_cast<IExpression*>(VAL(3))));
+		*};
+		-> PRIV IDENTIFIER LPAREN <EXPRESSION_LIST> RPAREN
+		{*
+			RETURN(IStatement::CreateFunction(ExecutionSemantic::Private, SYM(1), static_cast<IExpression*>(VAL(3))));
+		*};
+		-> EXEC IDENTIFIER LPAREN <EXPRESSION_LIST> RPAREN
+		{*
+			RETURN(IStatement::CreateFunction(ExecutionSemantic::Execute, SYM(1), static_cast<IExpression*>(VAL(3))));
+		*};
+		-> SEND IDENTIFIER LPAREN <EXPRESSION_LIST> RPAREN
+		{*
+			RETURN(IStatement::CreateFunction(ExecutionSemantic::Send, SYM(1), static_cast<IExpression*>(VAL(3))));
+		*};
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ATTACK_STATEMENT>
+	{
+		-> ATTACK <ATTACK_STATEMENT_OPTION> <ATTACK_DEF_LIST> ENDATTACK
+		{*
+			RETURN(
+				IStatement::CreateAttack(
+					static_cast<IAttackStatementOption*>(VAL(1)),
+					static_cast<IAttackDefine*>(VAL(2))));
+		*};
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ATTACK_STATEMENT_OPTION>
+	{
+		-> CLEAR ACTIONTYPE
+		{*
+			RETURN(IAttackStatementOption::CreateClearActionType());
+		*};
+
+		->;
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ATTACK_DEF_LIST>
+	{
+		-> <ATTACK_DEF> <ATTACK_DEF_LIST>
+		{*
+			IAttackDefine* ast = static_cast<IAttackDefine*>(VAL(0));
+			if(ast != NULL) { ast->SetNext(static_cast<IAttackDefine*>(VAL(1))); }
+			RETURN(ast);
+		*};
+
+		-> <ATTACK_DEF>
+		{*
+			RETURN(VAL(0));
+		*};
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ATTACK_DEF>
+	{
+		-> IDENTIFIER IDENTIFIER BY IDENTIFIER <ATTACK_OPTION_LIST>
+		{*
+			RETURN(IAttackDefine::Create(SYM(0), SYM(1), SYM(3), static_cast<IAttackOption*>(VAL(4))));
+		*}
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ATTACK_OPTION_LIST>
+	{
+		-> <ATTACK_OPTION> <ATTACK_OPTION_LIST>
+		{*
+			IAttackOption* ast = static_cast<IAttackOption*>(VAL(0));
+			if(ast != NULL) { ast->SetNext(static_cast<IAttackOption*>(VAL(1))); }
+			RETURN(ast);
+		*};
+
+		->;
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<ATTACK_OPTION>
+	{
+		-> EXCEPT IDENTIFIER
+		{*
+			RETURN(IAttackOption::Create(SYM(0), SYM(1)));
+		*}
+
+		-> PLACING IDENTIFIER
+		{*
+			RETURN(IAttackOption::Create(SYM(0), SYM(1)));
+		*}
+
+		-> PLACINGTARGET IDENTIFIER
+		{*
+			RETURN(IAttackOption::Create(SYM(0), SYM(1)));
+		*}
+
+		-> HOMMING IDENTIFIER
+		{*
+			RETURN(IAttackOption::Create(SYM(0), SYM(1)));
+		*}
+
+		-> MULTIHIT
+		{*
+			RETURN(IAttackOption::Create(SYM(0), _T("")));
+		*}
+
+		-> ORIGIN IDENTIFIER
+		{*
+			RETURN(IAttackOption::Create(SYM(0), SYM(1)));
+		*}
+
+		-> IN IDENTIFIER
+		{*
+			RETURN(IAttackOption::Create(SYM(0), SYM(1)));
+		*}
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	<EXPRESSION_LIST>
+	{
+		-> <EXPRESSION> COMMA <EXPRESSION_LIST>
+		{*
+			IExpression* ast = static_cast<IExpression*>(VAL(0));
+			if(ast != NULL)
+			{
+				ast->SetNext(static_cast<IExpression*>(VAL(2)));
+			}
+			RETURN(ast);
+		*};
+
+		-> <EXPRESSION>
+		{*
+			RETURN(VAL(0));
+		*};
+
+		->;
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<EXPRESSION>
+	{
+		-> <NUMBER> {* RETURN(VAL(0)); *};
+		-> STRING {* RETURN(IExpression::Create(SYM(0))); *};
+		-> BOOL {* RETURN(IExpression::Create(SYM(0) == _T("TRUE"))); *};
+	};
+
+	////////////////////////////////////////////////////////////////////////////
+	<NUMBER>
+	{
+		-> INTEGER {* RETURN(IExpression::Create(Fixed32(_tstoi(SYM(0).c_str())))); *};
+		-> FLOAT {* RETURN(IExpression::Create(Fixed32(_tstof(SYM(0).c_str())))); *};
+	}
+};
